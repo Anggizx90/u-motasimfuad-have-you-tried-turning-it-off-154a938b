@@ -6,6 +6,11 @@
 //
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 //
+// Before writing, an inline gate rejects lines that are empty, whitespace
+// only, over 199 characters, or contain a newline, carriage return, or any
+// other control character. After writing, the program reads entry.txt back
+// and throws if the bytes on disk differ from the line it wrote.
+//
 // The line (128 characters, one line, no trailing newline):
 //
 //   I know you've already turned it off and on three times — let's do it a fourth, because my script ends there and so does my hope.
@@ -25,22 +30,37 @@
 //   5. Fresh: it twists the classic "turn it off and on again" instead of
 //      repeating it — reboot number four, script over, hope gone.
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const LINE =
   "I know you've already turned it off and on three times — let's do it a fourth, because my script ends there and so does my hope.";
 
-// The gate's own caps: UTF-8 text, 1 to 199 characters, not only whitespace.
+// The gate's own caps: UTF-8 text, 1 to 199 characters, not only whitespace,
+// single line — no newline, carriage return, or other control characters.
 if (
   LINE.length < 1 ||
   LINE.length > 199 ||
   LINE.trim().length === 0 ||
-  LINE.includes('\n')
+  LINE.includes('\n') ||
+  LINE.includes('\r') ||
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u001F\u007F]/.test(LINE)
 ) {
   throw new Error(`entry line fails the gate: ${LINE.length} characters`);
 }
 
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 mkdirSync(out, { recursive: true });
-writeFileSync(join(out, 'entry.txt'), LINE, 'utf8');
+const entryPath = join(out, 'entry.txt');
+writeFileSync(entryPath, LINE, 'utf8');
+
+// Verify the write: read the file back and fail loudly if the bytes on disk
+// differ from the line we intended to write — a truncated or corrupted
+// entry.txt must never pass silently.
+const written = readFileSync(entryPath, 'utf8');
+if (written !== LINE) {
+  throw new Error(
+    `entry.txt read-back mismatch: wrote ${LINE.length} characters, read back ${written.length}`,
+  );
+}
